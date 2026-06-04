@@ -516,16 +516,42 @@ class ItemOrdenCompra(models.Model):
         verbose_name_plural = "Items Órdenes de Compra"
 
 class ItemSolicitud(models.Model):
-
-    solicitud = models.ForeignKey(
-        Solicitud,
-        on_delete=models.CASCADE
-    )
-
-    producto = models.ForeignKey(
-        Producto,
-        on_delete=models.CASCADE
-    )
-
+    solicitud = models.ForeignKey(Solicitud, on_delete=models.CASCADE)
+    producto = models.ForeignKey(Producto, on_delete=models.CASCADE)
     cantidad = models.PositiveIntegerField(default=1)
     procesado = models.BooleanField(default=False)
+
+    class Meta:
+        verbose_name = "Item Solicitud"
+        verbose_name_plural = "Items Solicitud"
+
+    def clean(self):
+
+        if not self.producto:
+            return
+
+        # Consumible individual: puede pedir varias unidades
+        if self.producto.tipo == "consumible" and self.producto.tipo_item == "individual":
+            if self.cantidad > self.producto.stock:
+                raise ValidationError({
+                    "cantidad": f"Stock disponible: {self.producto.stock}"
+                })
+
+        # Herramienta, dispositivo o kit: solo cantidad 1
+        else:
+            if self.cantidad != 1:
+                raise ValidationError({
+                    "cantidad": f"Stock Disponible: {self.producto.stock}"
+                })
+
+            if self.producto.stock < 1:
+                raise ValidationError({
+                    "cantidad": f"Stock insuficiente. Stock disponible: {self.producto.stock}"
+                })
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.producto.name} x {self.cantidad}"
