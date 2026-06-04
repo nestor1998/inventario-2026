@@ -170,6 +170,7 @@ class Producto(models.Model):
     state = models.ManyToManyField(Estado, verbose_name="Estado")
     location = models.ForeignKey(Ubicacion, on_delete=models.CASCADE, verbose_name="Ubicación")
     stock = models.PositiveIntegerField(default=1)
+    kits_generados = models.BooleanField(default=False)
 
     class Meta:
         verbose_name = "Producto"
@@ -514,3 +515,17 @@ class ItemOrdenCompra(models.Model):
         verbose_name = "Item Orden de Compra"
         verbose_name_plural = "Items Órdenes de Compra"
 
+class ItemSolicitud(models.Model):
+
+    solicitud = models.ForeignKey(
+        Solicitud,
+        on_delete=models.CASCADE
+    )
+
+    producto = models.ForeignKey(
+        Producto,
+        on_delete=models.CASCADE
+    )
+
+    cantidad = models.PositiveIntegerField(default=1)
+    procesado = models.BooleanField(default=False)

@@ -7,7 +7,7 @@ import uuid
 from .models import (
     Producto, Marca, Estado, Ubicacion, Solicitante, Solicitud,
     Proveedor, Cotizacion, ItemCotizacion, OrdenCompra, ItemOrdenCompra,
-    Elemento
+    Elemento,ItemSolicitud
 )
 
 # ==========================================================
@@ -15,6 +15,11 @@ from .models import (
 # ==========================================================
 
 
+
+class ItemSolicitudInline(admin.TabularInline):
+    model = ItemSolicitud
+    extra = 1
+    fields = ['producto', 'cantidad']
 # ==========================================================
 #  INLINE PARA ELEMENTOS (solo para kits)
 # ==========================================================
@@ -77,20 +82,28 @@ class ProductoAdmin(admin.ModelAdmin):
 
         producto = form.instance
 
-        # SOLO AL CREAR
-        if change:
+        # Solo cortar edición si NO es kit
+        if change and producto.tipo_item != 'kit':
             return
 
         # ============================================
         # KITS
         # ============================================
-        # Los kits siempre se clonan
-        if producto.tipo_item == 'kit' and producto.stock > 1:
+        if (
+            producto.tipo_item == 'kit'
+            and producto.stock > 1
+            and producto.elementos.exists()
+            and not producto.kits_generados
+        ):
 
             cantidad = producto.stock
 
             producto.stock = 1
             producto.save(update_fields=['stock'])
+
+            estado_disp, _ = Estado.objects.get_or_create(
+                name="DISPONIBLE"
+            )
 
             for _ in range(cantidad - 1):
 
@@ -101,24 +114,22 @@ class ProductoAdmin(admin.ModelAdmin):
                     stock=1,
                     location=producto.location,
                     author=producto.author,
+                    kits_generados=True
                 )
 
                 nuevo.brand.set(producto.brand.all())
-
-                estado_disp, _ = Estado.objects.get_or_create(
-                    name="DISPONIBLE"
-                )
-
                 nuevo.state.set([estado_disp])
 
                 for elem in producto.elementos.all():
-
                     Elemento.objects.create(
                         kit=nuevo,
                         nombre=elem.nombre,
                         cantidad_real=elem.cantidad_real,
-                        cantidad_actual=elem.cantidad_real,
+                        cantidad_actual=elem.cantidad_actual,
                     )
+
+            producto.kits_generados = True
+            producto.save(update_fields=['kits_generados'])
 
             return
 
@@ -211,6 +222,13 @@ class ProveedorAdmin(admin.ModelAdmin):
 # ==========================================================
 #  ADMIN SOLICITUD (1 Ã­tem por solicitud)
 # ==========================================================
+class ItemSolicitudInline(admin.TabularInline):
+    model = ItemSolicitud
+    extra = 1
+    fields = ['producto', 'cantidad']
+
+
+
 
 @admin.register(Solicitud)
 class SolicitudAdmin(admin.ModelAdmin):
@@ -240,14 +258,12 @@ class SolicitudAdmin(admin.ModelAdmin):
         'updated'
     ]
 
-    filter_horizontal = ['productos']
+    inlines = [ItemSolicitudInline]
 
     autocomplete_fields = ['requestor']
 
     fieldsets = [
-        ('Productos Solicitados', {
-            'fields': ['productos']
-        }),
+        
 
         ('Datos del Solicitante', {
             'fields': ['requestor']
@@ -283,29 +299,46 @@ class SolicitudAdmin(admin.ModelAdmin):
 
         solicitud = form.instance
 
-        # =========================================
-        # ENTREGADA -> EN USO
-        # =========================================
-        if solicitud.estado == "entregada":
+        en_uso, _ = Estado.objects.get_or_create(name="EN USO")
+        disponible, _ = Estado.objects.get_or_create(name="DISPONIBLE")
 
-            en_uso, _ = Estado.objects.get_or_create(
-                name="EN USO"
-            )
+        for item in solicitud.itemsolicitud_set.all():
 
-            for producto in solicitud.productos.all():
-                producto.state.set([en_uso])
+            producto = item.producto
 
-        # =========================================
-        # DEVUELTA -> DISPONIBLE
-        # =========================================
-        elif solicitud.estado == "devuelta":
+            # ENTREGAR
+            if solicitud.estado == "entregada" and not item.procesado:
 
-            disponible, _ = Estado.objects.get_or_create(
-                name="DISPONIBLE"
-            )
+                if producto.tipo == "consumible" and producto.tipo_item == "individual":
 
-            for producto in solicitud.productos.all():
-                producto.state.set([disponible])
+                    if item.cantidad > producto.stock:
+                        messages.error(
+                            request,
+                            f"No hay stock suficiente de {producto.name}. Stock actual: {producto.stock}"
+                        )
+                        continue
+
+                    producto.stock -= item.cantidad
+                    producto.save(update_fields=["stock"])
+
+                else:
+                    producto.state.set([en_uso])
+
+                item.procesado = True
+                item.save(update_fields=["procesado"])
+
+            # DEVOLVER
+            elif solicitud.estado == "devuelta" and item.procesado:
+
+                if producto.tipo == "consumible" and producto.tipo_item == "individual":
+                    producto.stock += item.cantidad
+                    producto.save(update_fields=["stock"])
+
+                else:
+                    producto.state.set([disponible])
+
+                item.procesado = False
+                item.save(update_fields=["procesado"])
 
 # ==========================================================
 #  ADMIN COTIZACIÃ“N
@@ -389,3 +422,7 @@ class OrdenCompraAdmin(admin.ModelAdmin):
             obj.proveedor = obj.cotizacion.proveedor
 
         super().save_model(request, obj, form, change)
+
+
+
+        
