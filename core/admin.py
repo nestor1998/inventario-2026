@@ -114,7 +114,9 @@ class ProductoAdmin(admin.ModelAdmin):
                     stock=1,
                     location=producto.location,
                     author=producto.author,
-                    kits_generados=True
+                    kits_generados=True,
+                    photo=producto.photo,
+                    
                 )
 
                 nuevo.brand.set(producto.brand.all())
@@ -165,6 +167,7 @@ class ProductoAdmin(admin.ModelAdmin):
                     stock=1,
                     location=producto.location,
                     author=producto.author,
+                    photo=producto.photo,
                 )
 
                 nuevo.brand.set(producto.brand.all())
